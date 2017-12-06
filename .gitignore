@@ -3,3 +3,6 @@
 
 # User-specific stuff:
 .idea/*
+
+__pycache__/system.cpython-36.pyc
+data/.DS_Store

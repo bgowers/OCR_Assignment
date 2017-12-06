@@ -11,12 +11,9 @@ version: v1.0
 """
 import numpy as np
 import utils.utils as utils
-import scipy.linalg
 from collections import Counter
-import operator
+from scipy import ndimage, linalg
 import enchant
-import cv2
-
 
 def divergence(class1, class2):
     """compute a vector of 1-D divergences
@@ -95,7 +92,7 @@ def reduce_dimensions_train(feature_vectors_full, model):
     count_indexes = np.bincount(sorted_indexes)
     print('count index: ', count_indexes.shape, count_indexes)
     final_reduction_row_indexes = np.argsort(-count_indexes)[0:10]
-    # print(final_reduction)
+    print('final reduction rows: ', final_reduction_row_indexes.shape)
 
     final_reduction_row_indexes = np.array(final_reduction_row_indexes)
     model['row_indexes'] = final_reduction_row_indexes.tolist()
@@ -172,6 +169,18 @@ def images_to_feature_vectors(images, bbox_size=None):
 # The three functions below this point are called by train.py
 # and evaluate.py and need to be provided.
 
+def increase_contrast(image, split):
+
+    for i in range(len(image)-1):
+        for j in range(len(image[0])-1):
+            if image[i][j] >= split:
+                image[i][j] = 255
+            else:
+                image[i][j] = 0
+
+    return image
+
+
 def process_training_data(train_page_names):
     """Perform the training stage and return results in a dictionary.
 
@@ -181,13 +190,19 @@ def process_training_data(train_page_names):
     print('Reading data')
     images_train = []
     labels_train = []
+    images_train_final = []
     for page_name in train_page_names:
         images_train = utils.load_char_images(page_name, images_train)
+        for image in images_train:
+            noise_red = ndimage.median_filter(image, 3)
+            img_contr = increase_contrast(noise_red, 150)
+            images_train_final.append(img_contr)
         labels_train = utils.load_labels(page_name, labels_train)
+    images_train_final = np.array(images_train_final)
     labels_train = np.array(labels_train)
 
     print('Extracting features from training data')
-    bbox_size = get_bounding_box_size(images_train)
+    bbox_size = get_bounding_box_size(images_train_final)
     print(bbox_size)
     fvectors_train_full = images_to_feature_vectors(images_train, bbox_size)
     # print(fvectors_train_full.shape, fvectors_train_full)
@@ -201,7 +216,7 @@ def process_training_data(train_page_names):
 
     covx = np.cov(fvectors_train_full, rowvar=False)
     N = covx.shape[0]
-    w, v = scipy.linalg.eigh(covx, eigvals=(N - 40, N - 1))
+    w, v = linalg.eigh(covx, eigvals=(N - 40, N - 1))
     v = np.fliplr(v)
     model_data['v'] = v.tolist()
 
@@ -225,13 +240,14 @@ def load_test_page(page_name, model):
     # kernel = np.ones((2, 2), np.float32) / 4
     bbox_size = model['bbox_size']
     images_test = utils.load_char_images(page_name)
-    # images_test_final = []
-    # for image in images_test:
-    #     median = cv2.medianBlur(image, 5)
-    #     images_test_final.append(median)
-    # images_test_final = np.array(images_test_final)
-    # print(images_test.shape)
-    fvectors_test = images_to_feature_vectors(images_test, bbox_size)
+    images_test_final = []
+    for image in images_test:
+        noise_red = ndimage.median_filter(image, 3)
+        img_contr = increase_contrast(noise_red, 150)
+        images_test_final.append(img_contr)
+    images_test_final = np.array(images_test_final)
+    print(images_test_final.shape)
+    fvectors_test = images_to_feature_vectors(images_test_final, bbox_size)
     # Perform the dimensionality reduction.
     fvectors_test_reduced = reduce_dimensions_test(fvectors_test, model)
     return fvectors_test_reduced
@@ -247,41 +263,48 @@ def correct_errors(page, labels, bboxes, model):
         bboxes - 2d array, each row gives the 4 bounding box coords of the character
         model - dictionary, stores the output of the training stage
         """
-    # word_str = ''
-    # char_list = [",", ".", "!", ";", ":"]
-    # full_dict = enchant.Dict("en_UK")
-    # print(labels[10])
-    #
-    # for i in range(len(bboxes)-1):
-    #     if labels[i] not in char_list:
-    #         word_str += labels[i]
-    #         space = (bboxes[i+1][0] - bboxes[i][2])
-    #         if space > 6:
-    #             if not full_dict.check(word_str):
-    #                 split_word = False
-    #                 for j in range(1, len(word_str)):
-    #                     left = word_str[:j]
-    #                     right = word_str[j:]
-    #                     if full_dict.check(left) and full_dict.check(right):
-    #                         split_word = True
-    #                 if not split_word:
-    #                     all_sugg = full_dict.suggest(word_str)
-    #                     reduced_sugg = [sugg for sugg in all_sugg if len(sugg) == len(word_str)]
-    #                     print(reduced_sugg)
-    #                     correction = ""
-    #                     correction_score = 3000
-    #                     for sugg_word in reduced_sugg:
-    #                         diff = hamdist(word_str, sugg_word)
-    #                         if diff < correction_score:
-    #                             correction = sugg_word
-    #                             correction_score = diff
-    #                     print(word_str)
-    #                     print(correction)
-    #                     if correction != "":
-    #                         for m in range(len(word_str)-1):
-    #                             if word_str[m] != correction[m]:
-    #                                 labels[i - ((len(word_str)-1) - m)] = correction[m]
-    #             word_str = ''
+    word_str = ''
+    char_list = [",", ".", "!", ";", ":"]
+    full_dict = enchant.Dict("en_UK")
+    print(labels[10])
+
+    for i in range(len(bboxes)-1):
+        if labels[i] not in char_list:
+            word_str += labels[i]
+            space = (bboxes[i+1][0] - bboxes[i][2])
+            if space > 6:
+                if not full_dict.check(word_str):
+                    split_word = False
+                    for j in range(1, len(word_str)-2):
+                        for k in range(j+1, len(word_str)):
+                            # print(word_str)
+                            left = word_str[:j]
+                            # print(left)
+                            middle = word_str[j:k]
+                            # print(middle)
+                            right = word_str[k:]
+                            # print(right)
+                            if (full_dict.check(left) and full_dict.check(right) and full_dict.check(middle)) or\
+                                    (full_dict.check(left) and full_dict.check(right)):
+                                split_word = True
+                    if not split_word:
+                        all_sugg = full_dict.suggest(word_str)
+                        reduced_sugg = [sugg for sugg in all_sugg if len(sugg) == len(word_str)]
+                        print(reduced_sugg)
+                        correction = ""
+                        correction_score = 3000
+                        for sugg_word in reduced_sugg:
+                            diff = hamdist(word_str, sugg_word)
+                            if diff < correction_score:
+                                correction = sugg_word
+                                correction_score = diff
+                        print(word_str)
+                        print(correction)
+                        if correction != "":
+                            for m in range(len(word_str)-1):
+                                if word_str[m] != correction[m] and not word_str[m].isupper():
+                                    labels[i - ((len(word_str)-1) - m)] = correction[m]
+                word_str = ''
 
     return labels
 
@@ -294,26 +317,6 @@ def hamdist(str1, str2):
         if ch1 != ch2:
             diffs += 1
     return diffs
-
-
-def get_neighbour_labels(nearest):
-
-    counts = [[]]
-
-    for neighbours in nearest:
-        i = 0
-        for label in neighbours:
-            if label in counts:
-                counts[i][label] += 1
-            else:
-                counts[i][label] = 1
-        i += 1
-
-    counts = np.array(counts)
-
-
-
-    return labels
 
 
 def classify_page(page, model):
