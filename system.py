@@ -12,23 +12,10 @@ version: v1.0
 import numpy as np
 import utils.utils as utils
 import scipy.linalg
-
-
-# def get_letter_data(pca_train, model):
-#     upper_letters = []
-#     lower_letters = []
-#
-#     for i in range(65, 91):
-#         upper_letters.append(pca_train[model['labels_train'][:] == chr(i), :])
-#     print(model['labels_train'][17] == chr(65))
-#
-#     for i in range(97, 123):
-#         lower_letters.append(pca_train[model['labels_train'][:] == chr(i), :])
-#
-#     all_letters = upper_letters + lower_letters
-#     # print(all_letters)
-#
-#     return all_letters
+from collections import Counter
+import operator
+import enchant
+import cv2
 
 
 def divergence(class1, class2):
@@ -66,7 +53,7 @@ def reduce_dimensions_train(feature_vectors_full, model):
 
     upper_letters = []
     lower_letters = []
-    sum_div = np.array(40)
+    div_matrix = np.empty([1, 40])
 
     # reduce features down to 40
     reduction_40 = np.dot((feature_vectors_full - np.mean(feature_vectors_full)), model['v'])
@@ -97,12 +84,17 @@ def reduce_dimensions_train(feature_vectors_full, model):
             for j in range(i+1, len(all_letters)):
                 if all_letters[i].shape[0] >= 20 and all_letters[j].shape[0] >= 20:
                     temp_div = divergence(all_letters[i], all_letters[j])
-                    sum_div = np.add(sum_div, temp_div)
+                    div_matrix = np.vstack((div_matrix, temp_div))
+    print(div_matrix)
 
     # sort features by largest divergence, select 10 indexes of largest as features to use from pca reduced data
-    sorted_indexes = np.argsort(-sum_div)
-    print('sorted index shape: ', sorted_indexes.shape)
-    final_reduction_row_indexes = sorted_indexes[0:10]
+    sorted_indexes = np.argsort(-div_matrix, axis=1)[:, 0:10]
+    print('sorted index shape: ', sorted_indexes.shape, sorted_indexes)
+    sorted_indexes = sorted_indexes.flatten()
+    print('flattened index shape: ', sorted_indexes.shape, sorted_indexes)
+    count_indexes = np.bincount(sorted_indexes)
+    print('count index: ', count_indexes.shape, count_indexes)
+    final_reduction_row_indexes = np.argsort(-count_indexes)[0:10]
     # print(final_reduction)
 
     final_reduction_row_indexes = np.array(final_reduction_row_indexes)
@@ -121,6 +113,7 @@ def reduce_dimensions_train(feature_vectors_full, model):
 
     return reduction
 
+
 def reduce_dimensions_test(feature_vectors_full, model):
     """Dummy methods that just takes 1st 10 pixels.
 
@@ -132,9 +125,10 @@ def reduce_dimensions_test(feature_vectors_full, model):
     """
     row_indexes = np.array(model['row_indexes'])
     v = np.array(model['v'])
+    train_mean = np.array(model['train_mean'])
 
-    reduction = np.dot((feature_vectors_full - np.mean(feature_vectors_full)), v[:, row_indexes])
-    print(reduction.shape)
+    reduction = np.dot((feature_vectors_full - train_mean), v[:, row_indexes])
+    # print(reduction.shape)
 
     return reduction
 
@@ -194,10 +188,12 @@ def process_training_data(train_page_names):
 
     print('Extracting features from training data')
     bbox_size = get_bounding_box_size(images_train)
+    print(bbox_size)
     fvectors_train_full = images_to_feature_vectors(images_train, bbox_size)
     # print(fvectors_train_full.shape, fvectors_train_full)
 
     model_data = dict()
+    model_data['train_mean'] = np.mean(fvectors_train_full).tolist()
     model_data['labels_train'] = labels_train.tolist()
     model_data['bbox_size'] = bbox_size
 
@@ -205,12 +201,9 @@ def process_training_data(train_page_names):
 
     covx = np.cov(fvectors_train_full, rowvar=False)
     N = covx.shape[0]
-    c, d = scipy.linalg.eigh(covx, eigvals=(N - 10, N - 1))
     w, v = scipy.linalg.eigh(covx, eigvals=(N - 40, N - 1))
     v = np.fliplr(v)
-    d = np.fliplr(d)
     model_data['v'] = v.tolist()
-    model_data['d'] = d.tolist()
 
     fvectors_train = reduce_dimensions_train(fvectors_train_full, model_data)
 
@@ -229,12 +222,98 @@ def load_test_page(page_name, model):
     page_name - name of page file
     model - dictionary storing data passed from training stage
     """
+    # kernel = np.ones((2, 2), np.float32) / 4
     bbox_size = model['bbox_size']
     images_test = utils.load_char_images(page_name)
+    # images_test_final = []
+    # for image in images_test:
+    #     median = cv2.medianBlur(image, 5)
+    #     images_test_final.append(median)
+    # images_test_final = np.array(images_test_final)
+    # print(images_test.shape)
     fvectors_test = images_to_feature_vectors(images_test, bbox_size)
     # Perform the dimensionality reduction.
     fvectors_test_reduced = reduce_dimensions_test(fvectors_test, model)
     return fvectors_test_reduced
+
+
+def correct_errors(page, labels, bboxes, model):
+    """Dummy error correction. Returns labels unchanged.
+
+        parameters:
+
+        page - 2d array, each row is a feature vector to be classified
+        labels - the output classification label for each feature vector
+        bboxes - 2d array, each row gives the 4 bounding box coords of the character
+        model - dictionary, stores the output of the training stage
+        """
+    # word_str = ''
+    # char_list = [",", ".", "!", ";", ":"]
+    # full_dict = enchant.Dict("en_UK")
+    # print(labels[10])
+    #
+    # for i in range(len(bboxes)-1):
+    #     if labels[i] not in char_list:
+    #         word_str += labels[i]
+    #         space = (bboxes[i+1][0] - bboxes[i][2])
+    #         if space > 6:
+    #             if not full_dict.check(word_str):
+    #                 split_word = False
+    #                 for j in range(1, len(word_str)):
+    #                     left = word_str[:j]
+    #                     right = word_str[j:]
+    #                     if full_dict.check(left) and full_dict.check(right):
+    #                         split_word = True
+    #                 if not split_word:
+    #                     all_sugg = full_dict.suggest(word_str)
+    #                     reduced_sugg = [sugg for sugg in all_sugg if len(sugg) == len(word_str)]
+    #                     print(reduced_sugg)
+    #                     correction = ""
+    #                     correction_score = 3000
+    #                     for sugg_word in reduced_sugg:
+    #                         diff = hamdist(word_str, sugg_word)
+    #                         if diff < correction_score:
+    #                             correction = sugg_word
+    #                             correction_score = diff
+    #                     print(word_str)
+    #                     print(correction)
+    #                     if correction != "":
+    #                         for m in range(len(word_str)-1):
+    #                             if word_str[m] != correction[m]:
+    #                                 labels[i - ((len(word_str)-1) - m)] = correction[m]
+    #             word_str = ''
+
+    return labels
+
+
+def hamdist(str1, str2):
+    """Count the # of differences between equal length strings str1 and str2"""
+
+    diffs = 0
+    for ch1, ch2 in zip(str1, str2):
+        if ch1 != ch2:
+            diffs += 1
+    return diffs
+
+
+def get_neighbour_labels(nearest):
+
+    counts = [[]]
+
+    for neighbours in nearest:
+        i = 0
+        for label in neighbours:
+            if label in counts:
+                counts[i][label] += 1
+            else:
+                counts[i][label] = 1
+        i += 1
+
+    counts = np.array(counts)
+
+
+
+    return labels
 
 
 def classify_page(page, model):
@@ -259,8 +338,15 @@ def classify_page(page, model):
     modtest = np.sqrt(np.sum(page * page, axis=1))
     modtrain = np.sqrt(np.sum(fvectors_train * fvectors_train, axis=1))
     dist = x / np.outer(modtest, modtrain.transpose())  # cosine distance
-    nearest = np.argmax(dist, axis=1)
-    print(nearest)
-    label = labels_train[nearest]
+    nearest = np.argsort(-dist, axis=1)[:, 0:5]
+    labels = []
+    for i in range(len(nearest)):
+        counted_labels = Counter(labels_train[nearest[i]])
+        labels.append(max(counted_labels, key=counted_labels.get))
+    labels = np.array(labels)
+    # count_labels = [np.bincount(nearest[i]) for i in range(nearest.shape[0])]
+    # print(count_labels[0])
+    # count_labels = np.array(count_labels)
+    # print(count_labels)
 
-    return label
+    return labels
