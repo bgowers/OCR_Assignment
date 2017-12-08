@@ -193,18 +193,21 @@ def process_training_data(train_page_names):
     images_train_final = []
     for page_name in train_page_names:
         images_train = utils.load_char_images(page_name, images_train)
-        for image in images_train:
-            noise_red = ndimage.median_filter(image, 3)
-            img_contr = increase_contrast(noise_red, 150)
-            images_train_final.append(img_contr)
         labels_train = utils.load_labels(page_name, labels_train)
+
+    for image in images_train:
+        img_contr = increase_contrast(image, 150)
+        noise_red = ndimage.median_filter(img_contr, 3)
+        images_train_final.append(noise_red)
+
     images_train_final = np.array(images_train_final)
     labels_train = np.array(labels_train)
+    print(images_train_final.shape)
 
     print('Extracting features from training data')
     bbox_size = get_bounding_box_size(images_train_final)
     print(bbox_size)
-    fvectors_train_full = images_to_feature_vectors(images_train, bbox_size)
+    fvectors_train_full = images_to_feature_vectors(images_train_final, bbox_size)
     # print(fvectors_train_full.shape, fvectors_train_full)
 
     model_data = dict()
@@ -242,9 +245,9 @@ def load_test_page(page_name, model):
     images_test = utils.load_char_images(page_name)
     images_test_final = []
     for image in images_test:
-        noise_red = ndimage.median_filter(image, 3)
-        img_contr = increase_contrast(noise_red, 150)
-        images_test_final.append(img_contr)
+        img_contr = increase_contrast(image, 150)
+        noise_red = ndimage.median_filter(img_contr, 3)
+        images_test_final.append(noise_red)
     images_test_final = np.array(images_test_final)
     print(images_test_final.shape)
     fvectors_test = images_to_feature_vectors(images_test_final, bbox_size)
@@ -263,48 +266,48 @@ def correct_errors(page, labels, bboxes, model):
         bboxes - 2d array, each row gives the 4 bounding box coords of the character
         model - dictionary, stores the output of the training stage
         """
-    word_str = ''
-    char_list = [",", ".", "!", ";", ":"]
-    full_dict = enchant.Dict("en_UK")
-    print(labels[10])
-
-    for i in range(len(bboxes)-1):
-        if labels[i] not in char_list:
-            word_str += labels[i]
-            space = (bboxes[i+1][0] - bboxes[i][2])
-            if space > 6:
-                if not full_dict.check(word_str):
-                    split_word = False
-                    for j in range(1, len(word_str)-2):
-                        for k in range(j+1, len(word_str)):
-                            # print(word_str)
-                            left = word_str[:j]
-                            # print(left)
-                            middle = word_str[j:k]
-                            # print(middle)
-                            right = word_str[k:]
-                            # print(right)
-                            if (full_dict.check(left) and full_dict.check(right) and full_dict.check(middle)) or\
-                                    (full_dict.check(left) and full_dict.check(right)):
-                                split_word = True
-                    if not split_word:
-                        all_sugg = full_dict.suggest(word_str)
-                        reduced_sugg = [sugg for sugg in all_sugg if len(sugg) == len(word_str)]
-                        print(reduced_sugg)
-                        correction = ""
-                        correction_score = 3000
-                        for sugg_word in reduced_sugg:
-                            diff = hamdist(word_str, sugg_word)
-                            if diff < correction_score:
-                                correction = sugg_word
-                                correction_score = diff
-                        print(word_str)
-                        print(correction)
-                        if correction != "":
-                            for m in range(len(word_str)-1):
-                                if word_str[m] != correction[m] and not word_str[m].isupper():
-                                    labels[i - ((len(word_str)-1) - m)] = correction[m]
-                word_str = ''
+    # word_str = ''
+    # char_list = [",", ".", "!", ";", ":"]
+    # full_dict = enchant.Dict("en_UK")
+    # print(labels[10])
+    #
+    # for i in range(len(bboxes)-1):
+    #     if labels[i] not in char_list:
+    #         word_str += labels[i]
+    #         space = (bboxes[i+1][0] - bboxes[i][2])
+    #         if space > 6:
+    #             if not full_dict.check(word_str):
+    #                 split_word = False
+    #                 for j in range(1, len(word_str)-2):
+    #                     for k in range(j+1, len(word_str)):
+    #                         # print(word_str)
+    #                         left = word_str[:j]
+    #                         # print(left)
+    #                         middle = word_str[j:k]
+    #                         # print(middle)
+    #                         right = word_str[k:]
+    #                         # print(right)
+    #                         if (full_dict.check(left) and full_dict.check(right) and full_dict.check(middle)) or\
+    #                                 (full_dict.check(left) and full_dict.check(right)):
+    #                             split_word = True
+    #                 if not split_word:
+    #                     all_sugg = full_dict.suggest(word_str)
+    #                     reduced_sugg = [sugg for sugg in all_sugg if len(sugg) == len(word_str)]
+    #                     print(reduced_sugg)
+    #                     correction = ""
+    #                     correction_score = 3000
+    #                     for sugg_word in reduced_sugg:
+    #                         diff = hamdist(word_str, sugg_word)
+    #                         if diff < correction_score:
+    #                             correction = sugg_word
+    #                             correction_score = diff
+    #                     print(word_str)
+    #                     print(correction)
+    #                     if correction != "":
+    #                         for m in range(len(word_str)-1):
+    #                             if word_str[m] != correction[m] and not word_str[m].isupper():
+    #                                 labels[i - ((len(word_str)-1) - m)] = correction[m]
+    #             word_str = ''
 
     return labels
 
@@ -340,7 +343,8 @@ def classify_page(page, model):
     x = np.dot(page, fvectors_train.transpose())
     modtest = np.sqrt(np.sum(page * page, axis=1))
     modtrain = np.sqrt(np.sum(fvectors_train * fvectors_train, axis=1))
-    dist = x / np.outer(modtest, modtrain.transpose())  # cosine distance
+    x /= np.outer(modtest, modtrain.transpose())  # cosine distance
+    dist = x
     nearest = np.argsort(-dist, axis=1)[:, 0:5]
     labels = []
     for i in range(len(nearest)):
