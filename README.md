@@ -9,6 +9,7 @@ The code written by me is in `system.py`.  All other code is used for setup and 
 1. Ensure that you have Python 3 installed.
 2. Clone this repository locally.
 3. Navigate to the root project directory and install the required packages (in requirements.txt) using pip (`pip install -r requirements.txt`)
-4. Run evaluation on the algorithms used with `python evaluate.py dev` (this takes a little while, be patient!).
+4. (optional) Run the training in order to update the 'model.json.gz' file (in '/data').
+5. Run evaluation on the model using `python evaluate.py dev` (this takes a little while, be patient!).
 
 The results will show the acccuracy of the classifier (percentage of correctly classified characters) on each page within the '/data/dev/' directory.  You can view the pages in pdf format within this directory.
