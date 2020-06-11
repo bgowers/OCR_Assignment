@@ -4,5 +4,5 @@
 # User-specific stuff:
 .idea/*
 
-__pycache__/system.cpython-36.pyc
+__pycache__/
 data/.DS_Store
